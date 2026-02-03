@@ -1,0 +1,15 @@
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+
+# Docker volumes
+volumes/
+
+# Profiling files
+*.prof
+root.py
+test.py
+pratice.py
+note.txt
