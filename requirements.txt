@@ -10,6 +10,7 @@ openai
 langchain-neo4j
 langchain-google-genai
 langchain-core
+langchain-community
 
 # Utilities
 python-dotenv
