@@ -1,4 +1,16 @@
-pymilvus 
+# Vector-RAG (Milvus)
+pymilvus
 sentence-transformers
-python-dotenv
+
+# LLM & Embedding
 google-genai
+openai
+
+# Graph-RAG (Neo4j + LangChain)
+langchain-neo4j
+langchain-google-genai
+langchain-core
+
+# Utilities
+python-dotenv
+pandas

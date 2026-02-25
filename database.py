@@ -13,8 +13,10 @@ class MilvusManager:
         schema = self.client.create_schema(auto_id=True)
         schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
         schema.add_field(field_name="video_vector", datatype=DataType.FLOAT_VECTOR, dim=384)
-        schema.add_field(field_name="caption", datatype=DataType.VARCHAR, max_length=500)
-        schema.add_field(field_name="timestamp", datatype=DataType.VARCHAR, max_length=100)
+        schema.add_field(field_name="caption",   datatype=DataType.VARCHAR, max_length=500)
+        schema.add_field(field_name="timestamp",  datatype=DataType.VARCHAR, max_length=100)
+        schema.add_field(field_name="video_id",   datatype=DataType.VARCHAR, max_length=200)
+        schema.add_field(field_name="camera_id",  datatype=DataType.VARCHAR, max_length=100)
 
         self.client.create_collection(
             collection_name=Config.COLLECTION_NAME, 
@@ -40,6 +42,6 @@ class MilvusManager:
             collection_name=Config.COLLECTION_NAME,
             data=[query_vector],
             limit=limit,
-            output_fields=["caption", "timestamp"]
+            output_fields=["caption", "timestamp", "video_id", "camera_id"]
         )
         return results
