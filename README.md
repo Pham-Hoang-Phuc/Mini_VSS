@@ -1,105 +1,209 @@
-# Mini VSS - Hệ thống Tìm kiếm Ngữ nghĩa trong Video
+# Mini VSS — CA-RAG: Context-Aware Retrieval-Augmented Generation
 
-Đây là một dự án demo xây dựng một hệ thống Tìm kiếm Ngữ nghĩa cho Video (Video Semantic Search - VSS) đơn giản. Hệ thống cho phép người dùng đặt câu hỏi bằng ngôn ngữ tự nhiên để tìm kiếm các phân đoạn liên quan trong một video.
+Hệ thống **CA-RAG** (Context-Aware RAG) dành cho phân tích nội dung video nhà máy thông minh.  
+Kết hợp **Vector-RAG** (tìm kiếm ngữ nghĩa qua Milvus) và **Graph-RAG** (suy luận quan hệ qua Neo4j), điều phối tự động bởi Gemini LLM.
 
-## Kiến trúc
+---
 
-Hệ thống bao gồm các thành phần chính:
+## Kiến trúc tổng quan
 
-1.  **Ứng dụng Python (`main.py`):**
-    *   Sử dụng `sentence-transformers` để chuyển đổi cả nội dung video (chú thích) và câu hỏi của người dùng thành các vector embedding.
-    *   Kết nối và tương tác với Milvus để lưu trữ và tìm kiếm các vector này.
-    *   Sử dụng Google Gemini API (`gemini-2.5-flash-lite`) để tạo ra câu trả lời dựa trên kết quả tìm kiếm từ Milvus.
-
-2.  **Cơ sở dữ liệu Vector (`Milvus`):**
-    *   Chạy trong Docker cùng với các dịch vụ phụ thuộc là `etcd` và `minio`.
-    *   Lưu trữ các vector embedding của các phân đoạn video.
-    *   Thực hiện tìm kiếm tương đồng (similarity search) để tìm các vector gần nhất với vector câu hỏi.
-
-3.  **Mô hình Ngôn ngữ Lớn (`Google Gemini`):**
-    *   Nhận kết quả tìm kiếm (context) từ Milvus và câu hỏi gốc của người dùng.
-    *   Tổng hợp thông tin và đưa ra câu trả lời mạch lạc, tự nhiên.
-
-## Yêu cầu
-
-Trước khi bắt đầu, hãy đảm bảo bạn đã cài đặt:
-
-*   [Docker](https://www.docker.com/get-started) và [Docker Compose](https://docs.docker.com/compose/install/)
-*   [Python 3.10](https://www.python.org/downloads/) và `pip`
-*   Một **API Key** từ Google AI Studio cho mô hình Gemini.
-
-## Hướng dẫn Cài đặt & Chạy
-
-### 1. Tải mã nguồn
-
-```bash
-git clone https://github.com/Pham-Hoang-Phuc/Mini_VSS.git
+```
+Video captions (VLM output)
+         │
+         ▼
+┌────────────────────────┐
+│   Ingestion Pipeline   │
+│                        │
+│  ┌─────────────────┐   │        ┌─────────────────────────┐
+│  │  Vector-RAG     │───┼───────▶│  Milvus (Vector DB)     │
+│  │  (embedding)    │   │        │  • caption (embedded)   │
+│  └─────────────────┘   │        │  • timestamp            │
+│                        │        │  • video_id             │
+│  ┌─────────────────┐   │        │  • camera_id            │
+│  │  Graph-RAG      │───┼───────▶│─────────────────────────│
+│  │  (LLM extract)  │   │        │  Neo4j (Knowledge Graph)│
+│  └─────────────────┘   │        │  • Entity nodes         │
+└────────────────────────┘        │  • Relationships        │
+                                  └─────────────────────────┘
+         │
+         ▼ (sau ingestion)
+┌────────────────────────────────────────────────────────────┐
+│                    CA-RAG Query Loop                       │
+│                                                            │
+│  User Query                                                │
+│      │                                                     │
+│      ▼                                                     │
+│  [1] Router LLM (Gemini)                                   │
+│      ├── use_vector? → Milvus similarity search            │
+│      └── use_graph?  → Neo4j Cypher reasoning              │
+│                                                            │
+│  [2] Parallel Retrieval                                    │
+│      ├── Vector-RAG: top-K caption theo ngữ nghĩa          │
+│      └── Graph-RAG:  entity + relationship từ đồ thị       │
+│                                                            │
+│  [3] Synthesize LLM (Gemini)                               │
+│      └── Câu trả lời cuối cùng                             │
+└────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Cấu hình Biến môi trường
+---
 
-Tạo một file tên là `.env` ở thư mục gốc của dự án.
+## Cấu trúc project
 
-Sao chép nội dung dưới đây vào file `.env` của bạn:
-
-```env
-# Thay YOUR_GEMINI_API_KEY bằng API key của bạn
-YOUR_GEMINI_API_KEY="AIzaSyXXXXXXXXXXXXXXXXXXX"
-
-# URI để kết nối tới Milvus chạy trong Docker
-MILVUS_URI="http://localhost:19530"
+```
+mini_vss/
+├── main.py            # Entry point: chạy ingestion + query loop
+├── query.py           # Chỉ chạy query loop (khi đã có data sẵn)
+├── config.py          # Cấu hình toàn hệ thống (load từ .env)
+│
+├── video_chunks.py    # Dữ liệu mẫu: caption, timestamp, video_id, camera_id
+├── embedding.py       # EmbeddingManager — SentenceTransformer
+├── database.py        # MilvusManager   — kết nối & thao tác Vector DB
+├── graph_rag.py       # GraphRAGManager — kết nối Neo4j, extract entity/relation, query
+├── llm.py             # GeminiManager   — router, generate answer
+│
+├── docker-compose.yml # Khởi động Milvus (etcd + minio + standalone)
+├── .env               # Biến môi trường (API key, DB connection)
+├── .env.example       # Template .env
+└── requirements.txt   # Python dependencies
 ```
 
-**Quan trọng:** Thay thế `AIzaSyXXXXXXXXXXXXXXXXXXX` bằng Google Gemini API Key thực của bạn.
+---
 
-### 3. Cài đặt các thư viện Python
+## Yêu cầu hệ thống
 
-Mở terminal và chạy lệnh sau để cài đặt các thư viện cần thiết:
+| Thành phần | Phiên bản |
+|---|---|
+| Python | ≥ 3.10 |
+| Docker & Docker Compose | ≥ 24 |
+| Neo4j | ≥ 5.x (Community OK) |
+| Gemini API Key | [Google AI Studio](https://aistudio.google.com/) |
+
+---
+
+## Hướng dẫn cài đặt
+
+### 1. Clone & tạo môi trường
 
 ```bash
+git clone <repo-url>
+cd mini_vss
+
+conda create -n mini_vss python=3.10 -y
+conda activate mini_vss
+
 pip install -r requirements.txt
 ```
 
-### 4. Khởi chạy các dịch vụ Docker
-
-Sử dụng Docker Compose để khởi chạy Milvus và các dịch vụ liên quan.
+### 2. Cấu hình `.env`
 
 ```bash
-docker-compose up -d
+cp .env.example .env
 ```
 
-Lệnh này sẽ tải các image cần thiết và khởi chạy container ở chế độ nền (`-d`). Quá trình này có thể mất vài phút trong lần chạy đầu tiên.
+Chỉnh sửa file `.env`:
 
-Để kiểm tra các container đang chạy, bạn có thể dùng lệnh `docker ps`. Bạn sẽ thấy 3 container có tên `milvus-standalone`, `milvus-minio`, và `milvus-etcd`.
+```env
+GEMINI_API_KEY="your_gemini_api_key_here"
+GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
 
-### 5. Chạy ứng dụng
+NEO4J_URI="neo4j://[IP_ADDRESS]"
+NEO4J_USERNAME="neo4j"
+NEO4J_PASSWORD="your_password"
+NEO4J_DATABASE="neo4j"
+```
 
-Sau khi các container đã khởi động và ổn định (chờ khoảng 1-2 phút), bạn có thể chạy ứng dụng chính:
+> **Lưu ý:** Neo4j Community Edition chỉ hỗ trợ database tên `neo4j`. Không đổi thành tên khác.
+
+### 3. Khởi động Milvus (Docker)
+
+```bash
+docker compose up -d
+```
+
+Đợi khoảng 30–60 giây để Milvus khởi động xong. Kiểm tra:
+
+```bash
+docker compose ps        # Đảm bảo 3 service đang healthy
+```
+
+### 4. Khởi động Neo4j
+
+Dùng [Neo4j Desktop](https://neo4j.com/download/) hoặc Docker:
+
+```bash
+docker run -d \
+  --name neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/your_password \
+  neo4j:5
+```
+
+---
+
+## ▶️ Cách sử dụng
+
+### Lần đầu: Ingestion + Query
 
 ```bash
 python main.py
 ```
 
-Khi chạy lần đầu, ứng dụng sẽ:
-1.  **Khởi tạo Collection:** Tạo cấu trúc dữ liệu trong Milvus.
-2.  **Nạp dữ liệu:** Chuyển đổi các chú thích video trong `video_chunks.py` thành vector và nạp vào Milvus.
+Pipeline sẽ:
+1. Embed caption → nạp vào **Milvus** (kèm `timestamp`, `video_id`, `camera_id`)
+2. Gọi Gemini trích xuất entity/relation từ caption → nạp vào **Neo4j** (knowledge graph thuần túy)
+3. Khởi động query loop
 
-Sau đó, chương trình sẽ hiển thị một dòng chờ để bạn nhập câu hỏi:
-
-```
-Bạn muốn tìm gì trong video?:
-```
-
-Bạn có thể nhập câu hỏi của mình (ví dụ: "con mèo đang làm gì?") và nhấn Enter. AI sẽ phân tích và trả về kết quả.
-
-Để thoát khỏi chương trình, nhập `exit` và nhấn Enter.
-
-## Dừng các dịch vụ
-
-Để tắt các container của Milvus, sử dụng lệnh:
+### Từ lần sau: Chỉ Query (không nạp lại data)
 
 ```bash
-docker-compose down
+python query.py
 ```
 
-Lệnh này sẽ dừng và xóa các container nhưng vẫn giữ lại dữ liệu trong thư mục `volumes` (nếu bạn muốn xóa cả dữ liệu, dùng `docker-compose down -v`).
+Dùng khi Milvus và Neo4j đã có dữ liệu sẵn từ lần chạy trước.
+
+### Ví dụ câu hỏi
+
+```
+Câu hỏi: Xe nâng làm gì trong video?
+Câu hỏi: Tìm cảnh có công nhân kiểm tra chất lượng
+Câu hỏi: Đội bảo trì bảo trì cái gì?
+Câu hỏi: Lúc nào có người ở khu vực đóng gói?
+```
+
+---
+
+## Chi tiết kỹ thuật
+
+### Phân chia lưu trữ
+
+| | Milvus (Vector DB) | Neo4j (Graph DB) |
+|---|---|---|
+| **Lưu gì** | caption embedding + metadata | Entity nodes + Relationships |
+| **Fields** | `caption`, `timestamp`, `video_id`, `camera_id` | `(Entity)-[RELATIONSHIP]->(Entity)` |
+| **Dùng cho** | Tìm kiếm ngữ nghĩa (semantic) | Suy luận quan hệ (reasoning) |
+
+### Models sử dụng
+
+| Mục đích | Model |
+|---|---|
+| Embedding (local) | `all-MiniLM-L6-v2` (SentenceTransformer) |
+| Entity extraction | `gemma-3-27b-it` (Gemini API) |
+| Cypher generation | `gemma-3-12b-it` (LangChain) |
+| QA & Router | `gemma-3-12b-it` (Gemini SDK) |
+
+### Router logic
+
+Gemini tự động phân tích câu hỏi và chọn công cụ:
+
+| Loại câu hỏi | Công cụ |
+|---|---|
+| "Tìm cảnh...", "Lúc nào có..." | Vector-RAG (Milvus) |
+| "Ai làm gì?", "Quan hệ giữa..." | Graph-RAG (Neo4j) |
+| Câu hỏi phức hợp | Cả hai |
+
+## Lưu ý
+
+- Dữ liệu mẫu trong `video_chunks.py` là caption giả lập từ camera nhà máy. Trong production, thay bằng output thật từ VLM (Vision-Language Model).
+- Mỗi lần chạy `main.py`, collection Milvus và graph Neo4j đều bị **reset và nạp lại** để tránh duplicate.
+- Dùng `query.py` nếu chỉ muốn hỏi mà không nạp dữ liệu lại.
