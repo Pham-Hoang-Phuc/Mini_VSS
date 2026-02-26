@@ -6,12 +6,12 @@ Chỉ chạy CA-RAG Query Loop — KHÔNG nạp dữ liệu vào database.
 Yêu cầu: đã chạy main.py ít nhất 1 lần để Milvus và Neo4j có dữ liệu.
 """
 
-from config import Config
-from embedding import EmbeddingManager
-from database import MilvusManager
-from llm import GeminiManager
-from graph_rag import GraphRAGManager
-from main import run_query
+from configs.config import Config
+from src.engine.embedding import EmbeddingManager
+from src.database.database import MilvusManager
+from src.models.llm import GeminiManager
+from src.engine.graph_rag import GraphRAGManager
+from src.main import run_query
 
 
 def main():
