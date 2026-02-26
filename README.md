@@ -52,20 +52,25 @@ Video captions (VLM output)
 
 ```
 mini_vss/
-├── main.py            # Entry point: chạy ingestion + query loop
-├── query.py           # Chỉ chạy query loop (khi đã có data sẵn)
-├── config.py          # Cấu hình toàn hệ thống (load từ .env)
-│
-├── video_chunks.py    # Dữ liệu mẫu: caption, timestamp, video_id, camera_id
-├── embedding.py       # EmbeddingManager — SentenceTransformer
-├── database.py        # MilvusManager   — kết nối & thao tác Vector DB
-├── graph_rag.py       # GraphRAGManager — kết nối Neo4j, extract entity/relation, query
-├── llm.py             # GeminiManager   — router, generate answer
-│
-├── docker-compose.yml # Khởi động Milvus (etcd + minio + standalone)
-├── .env               # Biến môi trường (API key, DB connection)
-├── .env.example       # Template .env
-└── requirements.txt   # Python dependencies
+├── configs/                    # Cấu hình toàn hệ thống
+│   └── config.py               # Load biến môi trường từ .env
+├── src/                        # Mã nguồn chính
+│   ├── main.py                 # Entry point: ingestion + query loop
+│   ├── database/
+│   │   └── database.py         # MilvusManager — kết nối & thao tác Vector DB
+│   ├── engine/
+│   │   ├── embedding.py        # EmbeddingManager — SentenceTransformer
+│   │   ├── graph_rag.py        # GraphRAGManager — Neo4j, extract entity/relation, query
+│   │   └── query.py            # Chỉ chạy query loop (khi đã có data sẵn)
+│   ├── models/
+│   │   └── llm.py              # GeminiManager — router, generate answer
+│   └── utils/
+│       └── video_chunks.py     # Dữ liệu mẫu: caption, timestamp, video_id, camera_id
+├── deployments/
+│   └── docker-compose.yml      # Khởi động Milvus (etcd + minio + standalone)
+├── .env                        # Biến môi trường (API key, DB connection)
+├── .env.example                # Template .env
+└── requirements.txt            # Python dependencies
 ```
 
 ---
