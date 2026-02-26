@@ -16,12 +16,12 @@ Flow:
     3. LLM Synthesize: tổng hợp câu trả lời cuối cùng
 """
 
-from config import Config
-from embedding import EmbeddingManager
-from database import MilvusManager
-from llm import GeminiManager
-from graph_rag import GraphRAGManager
-from video_chunks import chunks
+from configs.config import Config
+from src.engine.embedding import EmbeddingManager
+from src.database.database import MilvusManager
+from src.models.llm import GeminiManager
+from src.engine.graph_rag import GraphRAGManager
+from src.utils.video_chunks import chunks
 
 
 # ──────────────────────────────────────────────────────────────
@@ -58,7 +58,6 @@ def run_ingestion(embedder: EmbeddingManager,
     # ── Graph-RAG: trích xuất entity và đẩy vào Neo4j ─────────
     # Neo4j chỉ lưu caption (knowledge graph thuần tuý, không metadata)
     print("\n[2/2] Graph-RAG → Neo4j")
-    print("  (Đang gọi Gemini để trích xuất Entity & Relationship...)")
     graph_db.clear_graph()   # reset graph để tránh duplicate khi chạy lại
 
     total_rel = 0
@@ -173,7 +172,7 @@ def main():
     print("Nhập câu hỏi về video (gõ 'exit' để thoát).\n")
     while True:
         try:
-            user_query = input("❓ Câu hỏi: ").strip()
+            user_query = input("Câu hỏi: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nThoát.")
             break

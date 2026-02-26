@@ -1,5 +1,5 @@
 from pymilvus import MilvusClient, DataType
-from config import Config
+from configs.config import Config
 
 class MilvusManager:
     def __init__(self):

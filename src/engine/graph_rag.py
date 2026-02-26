@@ -17,7 +17,7 @@ from openai import OpenAI
 from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts.prompt import PromptTemplate
-from config import Config
+from configs.config import Config
 
 warnings.filterwarnings("ignore")
 
@@ -43,33 +43,28 @@ Examples:
 # Xe nâng xuất hiện trong video lúc nào?
 MATCH (a:Entity)-[r]->(b:Entity)
     WHERE toLower(a.name) CONTAINS 'xe nâng'
-RETURN a.name AS chu_the, type(r) AS hanh_dong, b.name AS doi_tuong,
-       a.timestamp AS thoi_gian
+RETURN a.name AS chu_the, type(r) AS hanh_dong, b.name AS doi_tuong
 
 # Công nhân làm gì ở cửa ra vào?
 MATCH (a:Entity)-[r]->(b:Entity)
     WHERE toLower(a.name) CONTAINS 'công nhân'
       AND toLower(b.name) CONTAINS 'cửa ra vào'
-RETURN a.name AS nhan_vien, type(r) AS hanh_dong, b.name AS dia_diem,
-       a.timestamp AS thoi_gian
+RETURN a.name AS nhan_vien, type(r) AS hanh_dong, b.name AS dia_diem
 
 # Đội bảo trì thực hiện công việc gì?
 MATCH (a:Entity)-[r]->(b:Entity)
     WHERE toLower(a.name) CONTAINS 'bảo trì'
-RETURN a.name AS doi_bao_tri, type(r) AS hanh_dong, b.name AS doi_tuong,
-       a.timestamp AS thoi_gian
+RETURN a.name AS doi_bao_tri, type(r) AS hanh_dong, b.name AS doi_tuong
 
 # Nhân viên QC kiểm tra gì?
 MATCH (a:Entity)-[r]->(b:Entity)
     WHERE toLower(a.name) CONTAINS 'qc' OR toLower(a.name) CONTAINS 'chất lượng'
-RETURN a.name AS nhan_vien, type(r) AS hanh_dong, b.name AS doi_tuong,
-       a.timestamp AS thoi_gian
+RETURN a.name AS nhan_vien, type(r) AS hanh_dong, b.name AS doi_tuong
 
 # Máy CNC được sử dụng như thế nào?
 MATCH (a:Entity)-[r]->(b:Entity)
     WHERE toLower(b.name) CONTAINS 'cnc' OR toLower(a.name) CONTAINS 'cnc'
-RETURN a.name AS chu_the, type(r) AS hanh_dong, b.name AS may_moc,
-       a.timestamp AS thoi_gian
+RETURN a.name AS chu_the, type(r) AS hanh_dong, b.name AS may_moc
 
 The question is:
 {question}
