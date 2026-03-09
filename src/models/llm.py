@@ -32,7 +32,7 @@ class GeminiManager:
         Returns:
             {
                 "use_vector": bool,   # True → dùng Milvus similarity search
-                "use_graph":  bool,   # True → dùng Neo4j cypher reasoning
+                "use_graph":  bool,   # True → dùng ArcadeDB cypher reasoning
                 "reason":     str     # giải thích ngắn (debug)
             }
         """
@@ -44,7 +44,7 @@ class GeminiManager:
                 Phù hợp với: câu hỏi tìm "cảnh nào", "đoạn nào", mô tả nội dung video chung.
                 Ví dụ: "Tìm cảnh có xe nâng", "Lúc nào có người trong kho?"
 
-                2. graph_query – Truy vấn đồ thị logic (Neo4j Cypher) về entity, hành động, quan hệ.
+                2. graph_query – Truy vấn đồ thị logic (ArcadeDB Cypher) về entity, hành động, quan hệ.
                 Phù hợp với: câu hỏi về MỐI QUAN HỆ, AI LÀM GÌ, ai liên quan đến máy móc nào.
                 Ví dụ: "Xe nâng làm gì?", "Công nhân QC kiểm tra gì?", "Đội bảo trì bảo trì cái gì?"
 
@@ -106,13 +106,13 @@ class GeminiManager:
         """
         Tổng hợp câu trả lời cuối cùng từ cả hai nguồn:
           - vector_context: kết quả semantic search từ Milvus
-          - graph_context : kết quả graph reasoning từ Neo4j
+          - graph_context : kết quả graph reasoning từ ArcadeDB
         """
         parts = []
         if vector_context.strip():
             parts.append(f"[Kết quả tìm kiếm ngữ nghĩa - Milvus]\n{vector_context}")
         if graph_context.strip():
-            parts.append(f"[Kết quả truy vấn đồ thị logic - Neo4j]\n{graph_context}")
+            parts.append(f"[Kết quả truy vấn đồ thị logic - ArcadeDB]\n{graph_context}")
 
         if not parts:
             return "Không tìm thấy thông tin liên quan trong video."

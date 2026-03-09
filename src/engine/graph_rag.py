@@ -1,22 +1,24 @@
 """
 graph_rag.py
 ============
-Module Graph-RAG: quản lý toàn bộ logic Neo4j cho CA-RAG pipeline.
-Tái sử dụng patterns từ graph_rag_complete.py, đóng gói thành class.
+Module Graph-RAG: quản lý toàn bộ logic ArcadeDB cho CA-RAG pipeline.
 
 Chức năng:
   - extract_and_store(): gọi Gemini trích xuất entity/relation từ caption,
-    MERGE vào Neo4j kèm property timestamp.
+    MERGE vào ArcadeDB kèm property timestamp.
   - query(): trả lời câu hỏi dựa trên đồ thị (GraphCypherQAChain).
 """
 
 import os
 import re
 import warnings
+import requests
+from requests.auth import HTTPBasicAuth
 from openai import OpenAI
-from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts.prompt import PromptTemplate
+from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
+from langchain_community.graphs.graph_store import GraphStore
 from configs.config import Config
 
 warnings.filterwarnings("ignore")
@@ -71,21 +73,160 @@ The question is:
 """
 
 
+# ──────────────────────────────────────────────────────────────
+# ArcadeDBGraph — wrapper dùng HTTP/JSON API của ArcadeDB
+# (thay thế langchain_neo4j.Neo4jGraph bằng HTTP API của ArcadeDB)
+# ──────────────────────────────────────────────────────────────
+class ArcadeDBGraph(GraphStore):
+    """
+    Kết nối ArcadeDB qua HTTP/JSON API (port 2480).
+    Implement interface tương thích với GraphCypherQAChain:
+      - thuộc tính `schema`
+      - method `query(cypher)`
+      - method `refresh_schema()`
+    """
+
+    def __init__(self, host: str, port: str, username: str, password: str, database: str):
+        self.base_url = f"http://{host}:{port}"
+        self.database = database
+        self.auth     = HTTPBasicAuth(username, password)
+        self.schema   = ""
+        self._ensure_database()
+        self._ensure_schema()
+        self.refresh_schema()
+
+    # ── Nội bộ ────────────────────────────────────────────────
+
+    def _command(self, command: str, language: str = "sql", params: dict = None) -> list:
+        """Gọi POST /api/v1/command/{db} và trả về list records."""
+        payload = {"language": language, "command": command}
+        if params:
+            payload["params"] = params
+
+        resp = requests.post(
+            f"{self.base_url}/api/v1/command/{self.database}",
+            json=payload,
+            auth=self.auth,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("result", [])
+
+    def _ensure_database(self):
+        """Tạo database nếu chưa tồn tại."""
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/v1/exists/{self.database}",
+                auth=self.auth,
+                timeout=10,
+            )
+            if resp.status_code == 200 and resp.json().get("result") is True:
+                return
+        except Exception:
+            pass
+
+        # Tạo database mới
+        try:
+            requests.post(
+                f"{self.base_url}/api/v1/server",
+                json={"command": f"create database {self.database}"},
+                auth=self.auth,
+                timeout=10,
+            )
+        except Exception as e:
+            print(f"  [ArcadeDB] ⚠ Không thể tạo database: {e}")
+
+    def _ensure_schema(self):
+        """Tạo vertex type Entity nếu chưa tồn tại."""
+        try:
+            self._command("CREATE VERTEX TYPE Entity IF NOT EXISTS")
+        except Exception:
+            pass
+        try:
+            self._command("CREATE PROPERTY Entity.name IF NOT EXISTS STRING")
+        except Exception:
+            pass
+        # Index unique trên Entity.name
+        try:
+            self._command("CREATE INDEX IF NOT EXISTS ON Entity (name) UNIQUE")
+        except Exception:
+            pass
+
+    def _cypher(self, cypher: str, params: dict = None) -> list:
+        """Chạy openCypher query."""
+        return self._command(cypher, language="cypher", params=params)
+
+    # ── Public interface ───────────────────────────────────────
+
+    def refresh_schema(self):
+        """Cập nhật schema string dùng cho LLM prompt."""
+        try:
+            all_types = self._command("SELECT name, type FROM schema:types")
+            v_names = [r["name"] for r in all_types if r.get("type") == "vertex"]
+            e_names = [r["name"] for r in all_types if r.get("type") == "edge"]
+            self.schema = (
+                f"Node properties: {', '.join(v_names) or 'Entity (name: STRING)'}\n"
+                f"Relationship types: {', '.join(e_names) or '(dynamic)'}\n"
+                f"All nodes are of type Entity with property `name`."
+            )
+            # Cập nhật structured schema cho GraphCypherQAChain
+            self._structured_schema = {
+                "node_props": {v: [{"property": "name", "type": "STRING"}] for v in v_names},
+                "rel_props":  {e: [] for e in e_names},
+                "relationships": []
+            }
+        except Exception:
+            self.schema = (
+                "Node properties: Entity (name: STRING)\n"
+                "Relationship types: (dynamic)\n"
+                "All nodes are of type Entity with property `name`."
+            )
+            self._structured_schema = {
+                "node_props": {"Entity": [{"property": "name", "type": "STRING"}]},
+                "rel_props":  {},
+                "relationships": []
+            }
+
+    @property
+    def get_schema(self) -> str:
+        """Trả về schema string — bắt buộc cho GraphStore."""
+        return self.schema
+
+    @property
+    def get_structured_schema(self) -> dict:
+        """Trả về structured schema — bắt buộc cho GraphCypherQAChain."""
+        return self._structured_schema
+
+    def add_graph_documents(self, graph_documents, *args, **kwargs):
+        """Stub — không dùng, ingestion được xử lý riêng trong GraphRAGManager."""
+        pass
+
+    def query(self, cypher: str) -> list:
+        """Chạy openCypher query và trả về list records (dict)."""
+        return self._cypher(cypher)
+
+
+
+# ──────────────────────────────────────────────────────────────
+# GraphRAGManager
+# ──────────────────────────────────────────────────────────────
 class GraphRAGManager:
     """
-    Quản lý Graph-RAG: kết nối Neo4j, trích xuất entity/relation từ caption,
+    Quản lý Graph-RAG: kết nối ArcadeDB, trích xuất entity/relation từ caption,
     và truy vấn đồ thị bằng ngôn ngữ tự nhiên.
     """
 
     def __init__(self):
-        self.kg = Neo4jGraph(
-            url=Config.NEO4J_URI,
-            username=Config.NEO4J_USERNAME,
-            password=Config.NEO4J_PASSWORD,
-            database=Config.NEO4J_DATABASE,
+        self.kg = ArcadeDBGraph(
+            host=Config.ARCADEDB_HOST,
+            port=Config.ARCADEDB_PORT,
+            username=Config.ARCADEDB_USERNAME,
+            password=Config.ARCADEDB_PASSWORD,
+            database=Config.ARCADEDB_DATABASE,
         )
         self._chain = None  # lazy init sau khi build xong graph
-        print("  [GraphRAG] ✓ Kết nối Neo4j thành công.")
+        print("  [GraphRAG] ✓ Kết nối ArcadeDB thành công.")
 
     # ──────────────────────────────────────────────────────────
     # 1. Trích xuất Entity & Relationship bằng Gemini
@@ -137,27 +278,29 @@ class GraphRAGManager:
         ]
         return entity_dict, relationship_list
 
-    # ──────────────────────────────────────────────────────────
-    # 3. MERGE vào Neo4j (kèm timestamp và camera_id)
-    # ──────────────────────────────────────────────────────────
-    def _merge_to_neo4j(self, relationships: list):
-        """MERGE nodes và relationships vào Neo4j (chỉ lưu tạo hạt (Entity) và quan hệ)."""
-        with self.kg._driver.session() as session:
-            for subject, relation, obj in relationships:
-                cypher = f"""
-                MERGE (a:Entity {{name: $subject}})
-                MERGE (b:Entity {{name: $object}})
-                MERGE (a)-[:`{relation}`]->(b)
-                """
-                session.run(cypher, subject=subject, object=obj)
+    # ────────────────────────────────────────────────────────
+    # 3. MERGE vào ArcadeDB (dùng openCypher)
+    # ────────────────────────────────────────────────────────
+    def _merge_to_arcadedb(self, relationships: list):
+        """MERGE nodes và relationships vào ArcadeDB qua openCypher MERGE."""
+        for subject, relation, obj in relationships:
+            cypher = f"""
+            MERGE (a:Entity {{name: $subject}})
+            MERGE (b:Entity {{name: $obj}})
+            MERGE (a)-[:`{relation}`]->(b)
+            """
+            try:
+                self.kg._cypher(cypher, params={"subject": subject, "obj": obj})
+            except Exception as e:
+                print(f"    [GraphRAG] ⚠ Lỗi khi thêm ({subject})-[{relation}]->({obj}): {e}")
 
     # ──────────────────────────────────────────────────────────
     # PUBLIC: extract_and_store (gọi từ ingestion pipeline)
     # ──────────────────────────────────────────────────────────
     def extract_and_store(self, caption: str):
         """
-        Trích xuất entity/relation từ caption và MERGE vào Neo4j.
-        Neo4j chỉ lưu nội dung (Entity + Relationship), không lưu metadata.
+        Trích xuất entity/relation từ caption và MERGE vào ArcadeDB.
+        ArcadeDB chỉ lưu nội dung (Entity + Relationship), không lưu metadata.
         Trả về số lượng relationship được thêm (0 nếu lỗi).
         """
         try:
@@ -165,7 +308,7 @@ class GraphRAGManager:
             entity_dict, rel_list = self._parse_llm_output(raw)
 
             if rel_list:
-                self._merge_to_neo4j(rel_list)
+                self._merge_to_arcadedb(rel_list)
                 print(f"    [GraphRAG] +{len(rel_list)} relationships | {len(entity_dict)} entities")
             else:
                 print(f"    [GraphRAG] ⚠ Không tìm thấy relationship trong chunk này.")
@@ -211,17 +354,6 @@ class GraphRAGManager:
             self.setup_chain()
         try:
             response = self._chain.invoke({"query": question})
-
-            # # ── In ra Cypher query để debug ────────────────────
-            # steps = response.get("intermediate_steps", [])
-            # for step in steps:
-            #     if isinstance(step, dict) and "query" in step:
-            #         cypher = step["query"].strip()
-            #         print(f"\n  ┌─ [Graph-RAG] Cypher Query ──────────────────")
-            #         print(f"  │  {cypher}")
-            #         print(f"  └─────────────────────────────────────────────\n")
-            #         break
-
             return response.get("result", "")
         except Exception as e:
             print(f"  [GraphRAG] ✗ Lỗi truy vấn: {e}")
@@ -231,7 +363,23 @@ class GraphRAGManager:
     # PUBLIC: clear_graph (tiện dùng khi reset)
     # ──────────────────────────────────────────────────────────
     def clear_graph(self):
-        """Xóa toàn bộ nodes và relationships trong Neo4j."""
-        with self.kg._driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
+        """Xóa toàn bộ vertices và edges trong ArcadeDB."""
+        try:
+            self.kg._command("DELETE FROM Entity")
+        except Exception:
+            pass
+        # Xoá tất cả edge types động
+        try:
+            edge_types = self.kg._command(
+                "SELECT name FROM schema:types WHERE type = 'EDGE'"
+            )
+            for et in edge_types:
+                name = et.get("name", "")
+                if name:
+                    try:
+                        self.kg._command(f"DELETE FROM `{name}`")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         print("  [GraphRAG] ✓ Đã xóa toàn bộ graph.")

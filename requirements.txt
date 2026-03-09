@@ -6,8 +6,8 @@ sentence-transformers
 google-genai
 openai
 
-# Graph-RAG (Neo4j + LangChain)
-langchain-neo4j
+# Graph-RAG (ArcadeDB + LangChain)
+requests
 langchain-google-genai
 langchain-core
 langchain-community

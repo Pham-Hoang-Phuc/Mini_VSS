@@ -3,7 +3,7 @@ query.py
 ========
 Chỉ chạy CA-RAG Query Loop — KHÔNG nạp dữ liệu vào database.
 
-Yêu cầu: đã chạy main.py ít nhất 1 lần để Milvus và Neo4j có dữ liệu.
+Yêu cầu: đã chạy main.py ít nhất 1 lần để Milvus và ArcadeDB có dữ liệu.
 """
 
 from configs.config import Config
@@ -26,7 +26,7 @@ def main():
     # Tải collection Milvus (không tạo lại)
     milvus_db.client.load_collection(Config.COLLECTION_NAME)
 
-    # Khởi tạo Cypher chain từ schema Neo4j hiện có
+    # Khởi tạo Cypher chain từ schema ArcadeDB hiện có
     graph_db.setup_chain()
 
     print("\nSẵn sàng! Nhập câu hỏi về video (gõ 'exit' để thoát).\n")
