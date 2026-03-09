@@ -1,18 +1,18 @@
 """
 main.py
 =======
-CA-RAG Pipeline hoàn chỉnh: Vector-RAG (Milvus) + Graph-RAG (Neo4j)
+CA-RAG Pipeline hoàn chỉnh: Vector-RAG (Milvus) + Graph-RAG (ArcadeDB)
 
 Flow:
   Ingestion Pipeline (chạy 1 lần):
-    1. Embed caption  → Milvus  (Vector-RAG)
-    2. Extract entity → Neo4j   (Graph-RAG)
+    1. Embed caption  → Milvus    (Vector-RAG)
+    2. Extract entity → ArcadeDB  (Graph-RAG)
 
   Query Loop:
     1. LLM Route: phân tích câu hỏi → chọn Vector / Graph / cả hai
     2. Parallel Retrieval:
          - Vector-RAG: Milvus similarity search
-         - Graph-RAG : Neo4j Cypher reasoning
+         - Graph-RAG : ArcadeDB Cypher reasoning
     3. LLM Synthesize: tổng hợp câu trả lời cuối cùng
 """
 
@@ -32,7 +32,7 @@ def run_ingestion(embedder: EmbeddingManager,
                   graph_db: GraphRAGManager,
                   video_chunks_data: list):
     """
-    Nạp dữ liệu vào cả Milvus và Neo4j.
+    Nạp dữ liệu vào cả Milvus và ArcadeDB.
     Gọi 1 lần khi khởi động (hoặc khi reset dữ liệu).
     """
     print("\n" + "="*55)
@@ -55,9 +55,9 @@ def run_ingestion(embedder: EmbeddingManager,
     milvus_db.insert_data(formatted_data)
     print(f"  [Milvus] ✓ Đã nạp {len(formatted_data)} chunks.")
 
-    # ── Graph-RAG: trích xuất entity và đẩy vào Neo4j ─────────
-    # Neo4j chỉ lưu caption (knowledge graph thuần tuý, không metadata)
-    print("\n[2/2] Graph-RAG → Neo4j")
+    # ── Graph-RAG: trích xuất entity và đẩy vào ArcadeDB ──────
+    # ArcadeDB chỉ lưu caption (knowledge graph thuần tuý, không metadata)
+    print("\n[2/2] Graph-RAG → ArcadeDB")
     graph_db.clear_graph()   # reset graph để tránh duplicate khi chạy lại
 
     total_rel = 0
@@ -66,7 +66,7 @@ def run_ingestion(embedder: EmbeddingManager,
         count = graph_db.extract_and_store(caption=chunk["caption"])
         total_rel += count
 
-    print(f"\n  [Neo4j] ✓ Đã nạp {total_rel} relationships từ {len(video_chunks_data)} chunks.")
+    print(f"\n  [ArcadeDB] ✓ Đã nạp {total_rel} relationships từ {len(video_chunks_data)} chunks.")
 
     # Khởi tạo chain sau khi graph đã có dữ liệu
     graph_db.setup_chain()
@@ -129,7 +129,7 @@ def run_query(query: str,
             print("  → [Vector-RAG] Không có kết quả.")
 
     if use_graph:
-        print("  → [Graph-RAG] Đang truy vấn Neo4j...")
+        print("  → [Graph-RAG] Đang truy vấn ArcadeDB...")
         graph_context = graph_db.query(query)
         if graph_context:
             print("  → [Graph-RAG] Có kết quả từ đồ thị.")
