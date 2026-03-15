@@ -1,3 +1,18 @@
+# Computer Vision / Video Pipeline
+torch
+torchvision
+opencv-python
+pillow
+numpy
+transformers
+supervision
+timm
+tqdm
+
+
+# SAM2
+git+https://github.com/facebookresearch/sam2.git
+
 # Vector-RAG (Milvus)
 pymilvus
 sentence-transformers
