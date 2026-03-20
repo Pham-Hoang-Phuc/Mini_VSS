@@ -1,15 +1,7 @@
-Đây là bản cập nhật nội dung file `README.md` của bạn với đầy đủ dấu tiếng Việt, giữ nguyên cấu trúc thư mục đã được fix và định dạng kỹ thuật:
-
----
-
 # Mini VSS -- CA-RAG: Context-Aware Retrieval-Augmented Generation
 
 Hệ thống CA-RAG (Context-Aware RAG) được thiết kế cho hệ thống phân tích nội dung video nhà máy thông minh.
 Dự án kết hợp **Vector-RAG** (tìm kiếm ngữ nghĩa qua Milvus) và **Graph-RAG** (suy luận quan hệ qua ArcadeDB), được điều phối tự động bởi Gemini LLM, tạo thành một đường ống xử lý thông tin từ video theo thời gian thực.
-
-Lưu ý: Tài liệu được viết theo chuẩn Markdown, thuần túy kỹ thuật và không có icon.
-
----
 
 ## 1. Kiến trúc tổng quan hệ thống (System Pipeline)
 
