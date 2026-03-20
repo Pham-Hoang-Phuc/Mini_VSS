@@ -1,209 +1,138 @@
-# Mini VSS — CA-RAG: Context-Aware Retrieval-Augmented Generation
-
-Hệ thống **CA-RAG** (Context-Aware RAG) dành cho phân tích nội dung video nhà máy thông minh.  
-Kết hợp **Vector-RAG** (tìm kiếm ngữ nghĩa qua Milvus) và **Graph-RAG** (suy luận quan hệ qua Neo4j), điều phối tự động bởi Gemini LLM.
+Đây là bản cập nhật nội dung file `README.md` của bạn với đầy đủ dấu tiếng Việt, giữ nguyên cấu trúc thư mục đã được fix và định dạng kỹ thuật:
 
 ---
 
-## Kiến trúc tổng quan
+# Mini VSS -- CA-RAG: Context-Aware Retrieval-Augmented Generation
 
-```
-Video captions (VLM output)
-         │
-         ▼
-┌────────────────────────┐
-│   Ingestion Pipeline   │
-│                        │
-│  ┌─────────────────┐   │        ┌─────────────────────────┐
-│  │  Vector-RAG     │───┼───────▶│  Milvus (Vector DB)     │
-│  │  (embedding)    │   │        │  • caption (embedded)   │
-│  └─────────────────┘   │        │  • timestamp            │
-│                        │        │  • video_id             │
-│  ┌─────────────────┐   │        │  • camera_id            │
-│  │  Graph-RAG      │───┼───────▶│─────────────────────────│
-│  │  (LLM extract)  │   │        │  Neo4j (Knowledge Graph)│
-│  └─────────────────┘   │        │  • Entity nodes         │
-└────────────────────────┘        │  • Relationships        │
-                                  └─────────────────────────┘
-         │
-         ▼ (sau ingestion)
-┌────────────────────────────────────────────────────────────┐
-│                    CA-RAG Query Loop                       │
-│                                                            │
-│  User Query                                                │
-│      │                                                     │
-│      ▼                                                     │
-│  [1] Router LLM (Gemini)                                   │
-│      ├── use_vector? → Milvus similarity search            │
-│      └── use_graph?  → Neo4j Cypher reasoning              │
-│                                                            │
-│  [2] Parallel Retrieval                                    │
-│      ├── Vector-RAG: top-K caption theo ngữ nghĩa          │
-│      └── Graph-RAG:  entity + relationship từ đồ thị       │
-│                                                            │
-│  [3] Synthesize LLM (Gemini)                               │
-│      └── Câu trả lời cuối cùng                             │
-└────────────────────────────────────────────────────────────┘
-```
+Hệ thống CA-RAG (Context-Aware RAG) được thiết kế cho hệ thống phân tích nội dung video nhà máy thông minh.
+Dự án kết hợp **Vector-RAG** (tìm kiếm ngữ nghĩa qua Milvus) và **Graph-RAG** (suy luận quan hệ qua ArcadeDB), được điều phối tự động bởi Gemini LLM, tạo thành một đường ống xử lý thông tin từ video theo thời gian thực.
+
+Lưu ý: Tài liệu được viết theo chuẩn Markdown, thuần túy kỹ thuật và không có icon.
 
 ---
 
-## Cấu trúc project
+## 1. Kiến trúc tổng quan hệ thống (System Pipeline)
 
-```
+Hệ thống hoạt động theo một đường ống xử lý (pipeline) từ trái sang phải như sau:
+[Camera] -> [Redis] -> [Buffer] -> [VLM] -> [Databases] -> [Query] -> [User]
+
+Chi tiết từng giai đoạn (Stage):
+
+1. **Stage 1 - Ingestion (Nhận dữ liệu)**: Đọc frame ảnh và metadata từ các Edge Box tại camera, truyền qua Redis Streams.
+2. **Stage 2 - Processing (Xử lý AI)**: Sử dụng cơ chế Sliding Window gom nhiều frames thành đoạn ngắn (Video Chunk). Đưa video chunk đó qua mô hình thị giác VLM (Qwen2-VL) để sinh ra mô tả hành động (Structured Caption) dưới dạng text.
+3. **Stage 3 - Storage (Lưu trữ ban đầu)**: Video file được lưu trên MinIO (Object Storage) làm bằng chứng trực quan.
+4. **Stage 4 - Knowledge Extraction (Trích xuất tri thức)**: 
+   - Từ caption sinh ra ở bước trên, mô hình Embedding biến text thành các vector đại diện, lưu vào **Milvus** để tìm kiếm ngữ nghĩa (Vector-RAG).
+   - LLM đọc caption để tách thành danh sách thực thể (entity) quy chuẩn và các quan hệ (relationships), đồng thời lưu vào **ArcadeDB** dưới dạng mạng lưới đồ thị (Graph-RAG).
+5. **Stage 5 - Retrieval (Truy vấn mở rộng)**: Khi người dùng đặt câu hỏi:
+   - LLM Router đoán ý định: Câu hỏi này nên tìm Vector (kiến thức hình ảnh tổng quát do VLM hiểu), hay tìm Graph (nhận diện logic quan hệ, hoạt động)? Hay là cả hai.
+   - Hệ thống truy xuất song song cả Milvus lẫn ArcadeDB.
+   - LLM Synthesis sẽ tổng hợp kết quả từ cả 2 nguồn và biên dịch thành câu trả lời cuối cùng để hiển thị cho người dùng (kèm theo timestamp hoặc video url từ MinIO).
+
+> Hiện tại dự án đang ở giai đoạn Tích hợp Database và Query Loop (Stage 4 & 5). Các kiến trúc đọc Frame (Stage 1), xử lý Video (Stage 2), và lưu Object (Stage 3) đang được mock để xây dựng placeholder sẵn sàng cho việc tích hợp sắp tới.
+
+---
+
+## 2. Cấu trúc thư mục (Directory Structure)
+
+```text
 mini_vss/
-├── main.py            # Entry point: chạy ingestion + query loop
-├── query.py           # Chỉ chạy query loop (khi đã có data sẵn)
-├── config.py          # Cấu hình toàn hệ thống (load từ .env)
-│
-├── video_chunks.py    # Dữ liệu mẫu: caption, timestamp, video_id, camera_id
-├── embedding.py       # EmbeddingManager — SentenceTransformer
-├── database.py        # MilvusManager   — kết nối & thao tác Vector DB
-├── graph_rag.py       # GraphRAGManager — kết nối Neo4j, extract entity/relation, query
-├── llm.py             # GeminiManager   — router, generate answer
-│
-├── docker-compose.yml # Khởi động Milvus (etcd + minio + standalone)
-├── .env               # Biến môi trường (API key, DB connection)
-├── .env.example       # Template .env
-└── requirements.txt   # Python dependencies
+├── main.py                - Điểm bắt đầu chương trình (Ingestion & Query Loop).
+├── .env                   - Biến môi trường (API Keys, DB Configs).
+├── configs/
+│   └── config.py          - Quản lý cấu hình hệ thống.
+├── data/
+│   └── samples/
+│       └── video_chunks_sample.py  - Dữ liệu mock output từ VLM.
+├── deployments/
+│   └── docker-compose.yml - Setup Milvus, etcd, MinIO, ArcadeDB.
+└── src/
+    ├── ingestion/         - Stage 1: Nhập dữ liệu luồng từ Stream server.
+    │   └── redis_consumer.py
+    ├── processing/        - Stage 2: Ghép Video & VLM Inference.
+    │   ├── video_synthesizer.py
+    │   └── vlm_reasoner.py
+    ├── storage/           - Stage 3: Tầng kết nối (Drivers) tới CSDL.
+    │   ├── milvus_store.py
+    │   ├── arcadedb_store.py
+    │   └── minio_store.py
+    ├── knowledge/         - Stage 4: Biến đổi text thành tri thức (Worker).
+    │   ├── embedding.py
+    │   └── entity_extractor.py
+    ├── retrieval/         - Stage 5: Tìm kiếm Hybrid RAG.
+    │   ├── vector_search.py
+    │   ├── graph_search.py
+    │   └── hybrid_retriever.py
+    ├── pipeline/          - Điều phối luồng thực thi (Orchestrator).
+    │   ├── ingestion_pipeline.py
+    │   └── query_pipeline.py
+    └── models/            - Kết nối tới Model Cloud (Gemini SDK).
+        └── llm.py
 ```
 
 ---
 
-## Yêu cầu hệ thống
+## 3. Mô hình hệ thống & Yêu cầu
 
-| Thành phần | Phiên bản |
-|---|---|
-| Python | ≥ 3.10 |
-| Docker & Docker Compose | ≥ 24 |
-| Neo4j | ≥ 5.x (Community OK) |
-| Gemini API Key | [Google AI Studio](https://aistudio.google.com/) |
+Python version >= 3.10
+Docker/Docker Compose version >= 24
 
----
-
-## Hướng dẫn cài đặt
-
-### 1. Clone & tạo môi trường
-
-```bash
-git clone <repo-url>
-cd mini_vss
-
-conda create -n mini_vss python=3.10 -y
-conda activate mini_vss
-
-pip install -r requirements.txt
-```
-
-### 2. Cấu hình `.env`
-
-```bash
-cp .env.example .env
-```
-
-Chỉnh sửa file `.env`:
-
-```env
-GEMINI_API_KEY="your_gemini_api_key_here"
-GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
-
-NEO4J_URI="neo4j://[IP_ADDRESS]"
-NEO4J_USERNAME="neo4j"
-NEO4J_PASSWORD="your_password"
-NEO4J_DATABASE="neo4j"
-```
-
-> **Lưu ý:** Neo4j Community Edition chỉ hỗ trợ database tên `neo4j`. Không đổi thành tên khác.
-
-### 3. Khởi động Milvus (Docker)
-
-```bash
-docker compose up -d
-```
-
-Đợi khoảng 30–60 giây để Milvus khởi động xong. Kiểm tra:
-
-```bash
-docker compose ps        # Đảm bảo 3 service đang healthy
-```
-
-### 4. Khởi động Neo4j
-
-Dùng [Neo4j Desktop](https://neo4j.com/download/) hoặc Docker:
-
-```bash
-docker run -d \
-  --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/your_password \
-  neo4j:5
-```
+| Điểm ứng dụng (Role)    | Tên Model được sử dụng                      |  
+|-------------------------|---------------------------------------------|
+| Embedding (Local)       | `all-MiniLM-L6-v2` (SentenceTransformer)    |
+| Graph Entity Extraction | `gemma-3-27b-it` (Hỗ trợ LLM phân tích)     |
+| Cypher SQL Generation   | `gemma-3-12b-it` (LangChain Graph tool)     |
+| QA & Router logic       | `gemma-3-12b-it` (Gemini SDK)               |
 
 ---
 
-## ▶️ Cách sử dụng
+## 4. Hướng dẫn cài đặt và thiết lập ban đầu
 
-### Lần đầu: Ingestion + Query
+1. **Khởi tạo môi trường conda python**:
+   ```bash
+   conda create -n mini_vss python=3.10 -y
+   conda activate mini_vss
+   pip install -r requirements.txt
+   ```
 
-```bash
-python main.py
-```
+2. **Thiết lập chung (Environment Vars)**:
+   ```bash
+   cp .env.example .env
+   # -> Thay đổi thông tin GEMINI_API_KEY bên trong .env hoặc thông số DB
+   ```
 
-Pipeline sẽ:
-1. Embed caption → nạp vào **Milvus** (kèm `timestamp`, `video_id`, `camera_id`)
-2. Gọi Gemini trích xuất entity/relation từ caption → nạp vào **Neo4j** (knowledge graph thuần túy)
-3. Khởi động query loop
+3. **Khởi tạo các DB Containers (Docker)**:
+   ```bash
+   cd deployments/
+   docker-compose up -d
+   # Kiểm tra trạng thái: docker-compose ps
+   # Lưu ý: Chờ khoảng vài chục giây để hệ thống DB (ArcadeDB, Milvus) khởi động ổn định.
+   ```
 
-### Từ lần sau: Chỉ Query (không nạp lại data)
-
-```bash
-python query.py
-```
-
-Dùng khi Milvus và Neo4j đã có dữ liệu sẵn từ lần chạy trước.
-
-### Ví dụ câu hỏi
-
-```
-Câu hỏi: Xe nâng làm gì trong video?
-Câu hỏi: Tìm cảnh có công nhân kiểm tra chất lượng
-Câu hỏi: Đội bảo trì bảo trì cái gì?
-Câu hỏi: Lúc nào có người ở khu vực đóng gói?
-```
+4. **Chạy luồng chính & Trải nghiệm**:
+   ```bash
+   python main.py
+   ```
+   *Hệ thống chạy Ingestion đưa dữ liệu mẫu vào Vector/Graph DB.*
+   *Sau đó, hệ thống sẽ chuyển sang vòng lặp Input CLI để người dùng đặt câu hỏi.*
 
 ---
 
-## Chi tiết kỹ thuật
+## 5. Ví dụ truy vấn Demo
 
-### Phân chia lưu trữ
+**Tra cứu theo hình ảnh (Vector DB):**
+- *"Tìm cảnh có công nhân kiểm tra chất lượng sản phẩm bằng kính hiển vi"*
+- *"Tìm đoạn nhà máy ban đêm lúc ca đêm bàn giao ở hành lang"*
 
-| | Milvus (Vector DB) | Neo4j (Graph DB) |
-|---|---|---|
-| **Lưu gì** | caption embedding + metadata | Entity nodes + Relationships |
-| **Fields** | `caption`, `timestamp`, `video_id`, `camera_id` | `(Entity)-[RELATIONSHIP]->(Entity)` |
-| **Dùng cho** | Tìm kiếm ngữ nghĩa (semantic) | Suy luận quan hệ (reasoning) |
+**Tra cứu theo logic hành động (Graph DB):**
+- *"Đội bảo trì đang bảo trì cái gì?"* (Trả về: đội bảo trì -> [kiểm_tra_định_kỳ] -> đường_ống_khí_nén)
+- *"Ai kiểm tra các tờ thông số của bảng mạch?"*
+- *"Xe nâng vận chuyển sản phẩm từ kho nào?"*
 
-### Models sử dụng
+---
 
-| Mục đích | Model |
-|---|---|
-| Embedding (local) | `all-MiniLM-L6-v2` (SentenceTransformer) |
-| Entity extraction | `gemma-3-27b-it` (Gemini API) |
-| Cypher generation | `gemma-3-12b-it` (LangChain) |
-| QA & Router | `gemma-3-12b-it` (Gemini SDK) |
+## Lưu ý 
+- Dữ liệu mẫu (Caption giả từ camera nhà máy) hiện tại là Mock data trong file `data/samples/`. Ở giai đoạn sau sẽ được thay thế bằng kết quả thực tế từ `src/processing/vlm_reasoner`.
+- Trong quá trình phát triển, mỗi lần chạy script `main.py`, dữ liệu cũ trên Milvus và ArcadeDB sẽ bị xóa và nạp lại từ đầu để đảm bảo môi trường sạch.
 
-### Router logic
-
-Gemini tự động phân tích câu hỏi và chọn công cụ:
-
-| Loại câu hỏi | Công cụ |
-|---|---|
-| "Tìm cảnh...", "Lúc nào có..." | Vector-RAG (Milvus) |
-| "Ai làm gì?", "Quan hệ giữa..." | Graph-RAG (Neo4j) |
-| Câu hỏi phức hợp | Cả hai |
-
-## Lưu ý
-
-- Dữ liệu mẫu trong `video_chunks.py` là caption giả lập từ camera nhà máy. Trong production, thay bằng output thật từ VLM (Vision-Language Model).
-- Mỗi lần chạy `main.py`, collection Milvus và graph Neo4j đều bị **reset và nạp lại** để tránh duplicate.
-- Dùng `query.py` nếu chỉ muốn hỏi mà không nạp dữ liệu lại.
+---
